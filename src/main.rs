@@ -60,15 +60,51 @@ async fn main() {
     };
 
     let app = Router::new()
+        .route("/healthz", get(health_handler))
         .route("/ws/control", get(ws_control_handler))
         .route("/ws/manager/request", get(ws_manager_handler))
         .route("/ws/agent/data", get(ws_agent_data_handler))
         .with_state(state);
 
-    let addr = "0.0.0.0:3000";
-    info!("Relay server listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    // PORT is what most hosts (Koyeb, Fly, Render) inject; BIND covers the rest.
+    let bind = std::env::var("BIND").unwrap_or_else(|_| {
+        let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+        format!("0.0.0.0:{port}")
+    });
+
+    let listener = tokio::net::TcpListener::bind(&bind)
+        .await
+        .unwrap_or_else(|e| panic!("failed to bind {bind}: {e}"));
+    info!("Relay server listening on {}", bind);
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
+}
+
+/// Liveness probe for Docker/systemd/platform health checks.
+async fn health_handler() -> impl IntoResponse {
+    "ok"
+}
+
+/// Resolve when the process is asked to stop, so in-flight sessions aren't cut
+/// mid-frame by an abrupt kill. Docker and systemd both send SIGTERM.
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut sigterm = match signal(SignalKind::terminate()) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!("cannot listen for SIGTERM: {e}");
+            return;
+        }
+    };
+
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => info!("SIGINT received, shutting down"),
+        _ = sigterm.recv() => info!("SIGTERM received, shutting down"),
+    }
 }
 
 async fn ws_control_handler(

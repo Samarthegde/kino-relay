@@ -1,0 +1,14 @@
+services:
+  relay:
+    build: .
+    image: kino-relay:latest
+    container_name: kino-relay
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      RUST_LOG: ${RUST_LOG:-info}
+    # TLS is terminated by the external nginx, which proxies to this host:3000
+    # over the LAN. Bind to a specific interface via LISTEN_ADDR if you don't
+    # want the relay reachable from every network this box is on.
+    ports:
+      - "${LISTEN_ADDR:-0.0.0.0}:3000:3000"
