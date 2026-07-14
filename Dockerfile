@@ -18,7 +18,7 @@ RUN touch src/main.rs && cargo build --release
 FROM debian:bookworm-slim
 
 # The relay terminates no TLS and makes no outbound calls, so it needs nothing
-# beyond libc — but curl earns its keep as the container healthcheck.
+# beyond libc - but curl earns its keep as the container healthcheck.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*

@@ -7,9 +7,10 @@ use axum::{
     routing::get,
     Router,
 };
+use axum_server::tls_rustls::RustlsConfig;
 use futures::{sink::SinkExt, stream::StreamExt};
 use serde::Deserialize;
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::{mpsc, Mutex, oneshot};
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -71,21 +72,83 @@ async fn main() {
         let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
         format!("0.0.0.0:{port}")
     });
+    let addr: SocketAddr = bind
+        .parse()
+        .unwrap_or_else(|e| panic!("BIND/PORT is not a valid socket address ({bind}): {e}"));
 
-    let listener = tokio::net::TcpListener::bind(&bind)
-        .await
-        .unwrap_or_else(|e| panic!("failed to bind {bind}: {e}"));
-    info!("Relay server listening on {}", bind);
+    // Terminate TLS ourselves only when handed a cert+key. Behind a TLS-terminating
+    // proxy (nginx, Caddy) leave these unset and serve plaintext on the private side.
+    match (std::env::var("TLS_CERT"), std::env::var("TLS_KEY")) {
+        (Ok(cert), Ok(key)) => {
+            // rustls 0.23 will not choose a crypto backend implicitly.
+            let _ = rustls::crypto::ring::default_provider().install_default();
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .unwrap();
+            let config = tls_config(&cert, &key)
+                .unwrap_or_else(|e| panic!("failed to load TLS cert/key ({cert}, {key}): {e}"));
+
+            let handle = axum_server::Handle::new();
+            let shutdown_handle = handle.clone();
+            tokio::spawn(async move {
+                shutdown_signal().await;
+                shutdown_handle.graceful_shutdown(Some(Duration::from_secs(10)));
+            });
+
+            info!("Relay listening on {} (TLS enabled - serving wss://)", addr);
+            axum_server::bind_rustls(addr, config)
+                .handle(handle)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        }
+        _ => {
+            let listener = tokio::net::TcpListener::bind(addr)
+                .await
+                .unwrap_or_else(|e| panic!("failed to bind {addr}: {e}"));
+            info!(
+                "Relay listening on {} (plaintext - terminate TLS at your proxy)",
+                addr
+            );
+            axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown_signal())
+                .await
+                .unwrap();
+        }
+    }
 }
 
 /// Liveness probe for Docker/systemd/platform health checks.
 async fn health_handler() -> impl IntoResponse {
     "ok"
+}
+
+/// Build the TLS config from a PEM cert chain + private key.
+///
+/// We pin ALPN to http/1.1 deliberately. axum-server's default advertises h2 as
+/// well, and a client that takes it can never perform a WebSocket upgrade - that
+/// handshake is an HTTP/1.1 mechanism, so the connection just 400s. This relay
+/// serves nothing but WebSockets, so h2 has no upside here.
+fn tls_config(cert_path: &str, key_path: &str) -> Result<RustlsConfig, String> {
+    let cert_pem = std::fs::read(cert_path).map_err(|e| format!("cannot read cert: {e}"))?;
+    let key_pem = std::fs::read(key_path).map_err(|e| format!("cannot read key: {e}"))?;
+
+    let certs = rustls_pemfile::certs(&mut cert_pem.as_slice())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("invalid cert PEM: {e}"))?;
+    if certs.is_empty() {
+        return Err("no certificates found in cert file".to_string());
+    }
+
+    let key = rustls_pemfile::private_key(&mut key_pem.as_slice())
+        .map_err(|e| format!("invalid key PEM: {e}"))?
+        .ok_or_else(|| "no private key found in key file".to_string())?;
+
+    let mut config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map_err(|e| format!("cert/key mismatch: {e}"))?;
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+
+    Ok(RustlsConfig::from_config(Arc::new(config)))
 }
 
 /// Resolve when the process is asked to stop, so in-flight sessions aren't cut
