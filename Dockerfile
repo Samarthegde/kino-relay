@@ -28,6 +28,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Optional extra trust anchor, for networks that inspect TLS (a corporate
+# FortiGate/Zscaler/etc re-signing certificates) or a control plane behind a
+# private CA. Drop the PEM next to this Dockerfile as `extra-ca.crt` and it is
+# trusted; the [.] glob makes the file optional, so builds work without it.
+COPY extra-ca[.]crt /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+
 RUN useradd --system --create-home --shell /usr/sbin/nologin kino \
     && mkdir -p /data && chown kino:kino /data
 USER kino

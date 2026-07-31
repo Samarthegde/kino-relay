@@ -226,6 +226,25 @@ starts enforcing token auth immediately - no restart. Restarts load the saved
 key and skip enrollment, so the one-time code isn't needed again. From then on
 kino-control health-checks this relay every minute.
 
+### Behind a TLS-inspecting firewall
+
+Enrollment is an outbound HTTPS call, verified against the host's certificate
+store. On a network where a firewall (FortiGate, Zscaler, …) re-signs TLS, that
+call fails with `invalid peer certificate: UnknownIssuer` even though `curl`
+works elsewhere. Confirm with:
+
+```bash
+openssl s_client -connect <control-host>:443 -servername <control-host> </dev/null 2>/dev/null \
+  | openssl x509 -noout -issuer
+```
+
+If the issuer is your firewall rather than a public CA, either **exempt the
+control-plane hostname from SSL inspection** (preferred - the relay then sees
+the real certificate), or trust the firewall's CA: save it as `extra-ca.crt`
+next to the Dockerfile and rebuild, or add it to the host's
+`/usr/local/share/ca-certificates/` and run `update-ca-certificates` for a
+systemd install.
+
 Roadmap:
 
 - [x] Token auth on all three WebSocket endpoints.
