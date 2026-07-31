@@ -20,8 +20,12 @@ FROM debian:bookworm-slim
 # The relay terminates no TLS and its only outbound call is enrollment with
 # kino-control, whose root certificates are compiled in (webpki-roots) - so it
 # needs nothing beyond libc. curl earns its keep as the container healthcheck.
+# ca-certificates: enrollment verifies kino-control against the OS trust store,
+# so the store has to exist in the image. Mount extra CAs into
+# /usr/local/share/ca-certificates and run update-ca-certificates if your
+# control plane sits behind a private or intercepting CA.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --system --create-home --shell /usr/sbin/nologin kino \

@@ -22,5 +22,9 @@ uuid = { version = "1", features = ["v4"] }
 subtle = "2"
 jsonwebtoken = "9"
 # Small blocking HTTP client, used once at startup to self-enroll with
-# kino-control. rustls - no OpenSSL system dependency.
-ureq = { version = "2", default-features = false, features = ["tls", "json"] }
+# kino-control. rustls - no OpenSSL system dependency. `native-certs` makes it
+# honour the OS trust store (like kino-agent does), so enrollment works behind
+# a TLS-inspecting corporate proxy or against a control plane using a private
+# CA; without it only Mozilla's bundled roots are trusted and those setups fail
+# with "invalid peer certificate: UnknownIssuer".
+ureq = { version = "2", default-features = false, features = ["tls", "json", "native-certs"] }

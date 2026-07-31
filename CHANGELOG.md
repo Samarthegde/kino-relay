@@ -31,6 +31,12 @@ All notable changes to kino-relay are documented here. The format is based on
   twice; a rejected code is logged loudly but leaves the relay running.
 
 ### Changed
+- **Enrollment now trusts the OS certificate store** (`native-certs`), matching
+  kino-agent. Previously only Mozilla's bundled roots were accepted, so a relay
+  behind a TLS-inspecting proxy - or talking to a control plane with a private
+  CA - failed enrollment with `invalid peer certificate: UnknownIssuer` even
+  though `curl` worked on the same host. The Docker image now ships
+  `ca-certificates` accordingly.
 - **License: MIT - AGPL-3.0.** Running a modified relay as a network service
   now requires publishing those modifications. Commercial licensing is
   available from the author.
