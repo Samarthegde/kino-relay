@@ -7,8 +7,26 @@ services:
     environment:
       PORT: "3000"
       RUST_LOG: ${RUST_LOG:-info}
+      # ── Kino Cloud enrollment (see .env.example) ──
+      # Set all three on the FIRST start to self-enroll with kino-control. The
+      # code is one-time; afterwards the saved public key in the volume is what
+      # keeps auth working, so enrollment is simply skipped on later starts.
+      KINO_CONTROL_URL: ${KINO_CONTROL_URL:-}
+      KINO_ENROLL_CODE: ${KINO_ENROLL_CODE:-}
+      RELAY_PUBLIC_URL: ${RELAY_PUBLIC_URL:-}
+      RELAY_NAME: ${RELAY_NAME:-}
+      # Optional static shared secret, independent of kino-control. Worth
+      # setting as a safety net: a relay with neither credential runs OPEN.
+      RELAY_TOKEN: ${RELAY_TOKEN:-}
+    volumes:
+      # Persists control.pub.pem so restarts keep enforcing auth without
+      # needing a fresh enrollment code.
+      - relay-data:/data
     # TLS is terminated by the external nginx, which proxies to this host:3000
     # over the LAN. Bind to a specific interface via LISTEN_ADDR if you don't
     # want the relay reachable from every network this box is on.
     ports:
-      - "${LISTEN_ADDR:-0.0.0.0}:3000:3000"
+      - "${LISTEN_ADDR:-127.0.0.1}:3000:3000"
+
+volumes:
+  relay-data:

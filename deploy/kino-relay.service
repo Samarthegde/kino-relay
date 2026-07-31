@@ -1,0 +1,45 @@
+[Unit]
+Description=Kino Relay - splices agent and manager WebSockets behind NAT
+Documentation=https://github.com/Samarthegde/kino-relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Holds KINO_CONTROL_URL / KINO_ENROLL_CODE / RELAY_PUBLIC_URL for the first
+# start, and RELAY_TOKEN if you use one. Keep it root-only (chmod 600).
+EnvironmentFile=/etc/kino-relay/kino-relay.env
+ExecStart=/usr/local/bin/kino-relay
+Restart=always
+RestartSec=5s
+
+# StateDirectory gives us /var/lib/kino-relay owned by the dynamic user, which
+# is where the public key received at enrollment is persisted - without it a
+# restart would lose the key and try to reuse a consumed enrollment code.
+DynamicUser=yes
+StateDirectory=kino-relay
+WorkingDirectory=/var/lib/kino-relay
+Environment=RELAY_JWT_PUBLIC_KEY=/var/lib/kino-relay/control.pub.pem
+
+# The relay only accepts connections and makes one outbound HTTPS call at
+# enrollment. It needs no privileges beyond that.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target
