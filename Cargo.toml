@@ -1,8 +1,8 @@
 [package]
 name = "kino-relay"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
-license = "MIT"
+license = "AGPL-3.0-only"
 
 [dependencies]
 axum = { version = "0.7", features = ["ws", "macros"] }
@@ -17,3 +17,10 @@ serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
+# Bearer-token auth: static-token comparison that doesn't leak timing, and
+# HS256 JWT verification for tokens issued by kino-control.
+subtle = "2"
+jsonwebtoken = "9"
+# Small blocking HTTP client, used once at startup to self-enroll with
+# kino-control. rustls - no OpenSSL system dependency.
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }

@@ -84,4 +84,7 @@ current lack of authentication is already documented, but for anything else emai
 ## License
 
 By contributing, you agree that your contributions will be licensed under the
-[MIT License](LICENSE).
+[GNU AGPL-3.0](LICENSE), and you grant the project maintainer a perpetual,
+worldwide, non-exclusive, royalty-free right to relicense your contribution,
+including under commercial terms. (This keeps dual licensing possible without
+chasing every past contributor.)

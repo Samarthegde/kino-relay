@@ -1,6 +1,7 @@
 # kino-relay
 
-[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![build](https://github.com/Samarthegde/kino-relay/actions/workflows/build.yml/badge.svg)](https://github.com/Samarthegde/kino-relay/actions/workflows/build.yml)
+[![license: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 A small, stateless WebSocket relay that lets [Kino SSH Manager](https://github.com/Samarthegde/kino-ssh-manager)
 reach machines running [kino-agent](https://github.com/Samarthegde/kino-agent)
@@ -34,7 +35,9 @@ The relay exposes three WebSocket endpoints plus a health check:
 | `GET /ws/agent/data?session_id=<id>` | agent | The agent's return data socket for one session. The relay hands it to the waiting manager and bridges the two. |
 
 Each agent is identified by a caller-chosen `agent_id`; each session by a
-relay-generated `session_id`.
+relay-generated `session_id`. When auth is configured, every `/ws/*` endpoint
+also requires an `Authorization: Bearer` header - see
+[Authentication](#authentication).
 
 ---
 
@@ -106,6 +109,10 @@ TLS_CERT=/path/fullchain.pem TLS_KEY=/path/privkey.pem PORT=443 cargo run --rele
 | `PORT` | `3000` | Port to listen on (what most PaaS hosts inject). |
 | `BIND` | `0.0.0.0:$PORT` | Full listen address; overrides `PORT`. |
 | `TLS_CERT` / `TLS_KEY` | unset | PEM cert chain + private key. Set both to serve `wss://` directly. |
+| `RELAY_TOKEN` | unset | Static bearer token; see [Authentication](#authentication). |
+| `RELAY_JWT_PUBLIC_KEY` | `control.pub.pem` when enrolling | Path to kino-control's Ed25519 public key PEM - loaded if present, written on self-enrollment. |
+| `KINO_CONTROL_URL` / `KINO_ENROLL_CODE` / `RELAY_PUBLIC_URL` | unset | Set all three to self-enroll with kino-control at startup; see [Enrolling](#enrolling-in-kino-control-self-enrollment). |
+| `RELAY_NAME` | unset | Optional display name used when enrolling. |
 | `RUST_LOG` | `info` | Log verbosity. |
 
 The relay handles `SIGTERM`/`SIGINT` gracefully, so `docker stop` and systemd
@@ -119,6 +126,20 @@ duration. An always-on VM (e.g. Oracle Cloud's Always Free tier, which is ARM -
 the aarch64 build applies) is a good fit; serverless/idle-sleeping tiers are not.
 
 ---
+
+## Installing
+
+Prebuilt Linux binaries (x86_64 and aarch64) are attached to every
+[release](https://github.com/Samarthegde/kino-relay/releases) - no toolchain
+needed:
+
+```bash
+curl -fsSL -o kino-relay \
+  https://github.com/Samarthegde/kino-relay/releases/latest/download/kino-relay-x86_64-unknown-linux-gnu
+chmod +x kino-relay && sudo mv kino-relay /usr/local/bin/
+```
+
+Or use the Docker image (see [Deployment](#deployment)).
 
 ## Building from source
 
@@ -136,32 +157,83 @@ system dependency.
 ## Project layout
 
 ```
-src/main.rs        The whole relay: routing, control/manager/data handlers, bridging
+src/main.rs        The whole relay: routing, auth, self-enrollment, control/manager/data handlers, bridging
 Dockerfile         Multi-stage, non-root, healthchecked image
 docker-compose.yml Relay service (plaintext, for use behind a proxy)
 deploy/nginx-kino-relay.conf   Correct nginx reverse-proxy config
 .env.example       Sample environment
+.github/workflows/build.yml    CI matrix + release publishing
+CHANGELOG.md       Release history
 ```
 
 ---
 
-## Security & roadmap
+## Authentication
 
-> **⚠️ The relay currently has no authentication.** Anyone who can reach it and
-> knows (or guesses) an `agent_id` can open an SSH transport to that agent's local
-> `sshd`, and anyone can register an `agent_id`. Your `sshd`'s own authentication
-> is the only gate. **Do not treat the relay as a security boundary yet.**
+All three WebSocket endpoints require an `Authorization: Bearer <token>` header
+when auth is configured (a header, not a query parameter, so tokens stay out of
+proxy access logs). Two mechanisms, independently optional - a caller passes if
+it satisfies either:
 
-SSH remains end-to-end encrypted through the relay, so a relay operator cannot
-read sessions or credentials - but the lack of relay-level auth is the top
-priority on the roadmap:
+| Env var | Mechanism |
+|---------|-----------|
+| `RELAY_TOKEN` | One static shared secret, compared in constant time. The simple option for a personal relay: set it here, in `kino-agent --token`, and in the host's *Relay token* field in the manager. |
+| `RELAY_JWT_PUBLIC_KEY` | Path to an Ed25519 public key PEM. Verifies JWTs minted by a [kino-control](https://github.com/Samarthegde/kino-control) instance. Tokens carry a role (`agent`/`manager`) and an `agent_id` scope, so a manager token for host A cannot register agents or reach host B. |
 
-- [ ] **Shared-secret / token auth** on all three WebSocket endpoints.
-- [ ] Per-agent connection tokens so an `agent_id` can't be hijacked.
+Verification is asymmetric on purpose: the relay holds no signing material, so
+a relay operator can verify tokens but never mint them - the property that
+makes a federated pool of community-run relays possible later.
+
+> **With neither variable set the relay runs open** (and says so loudly at
+> startup): anyone who can reach it and knows an `agent_id` can open an SSH
+> transport to that agent's local `sshd`, whose own authentication becomes the
+> only gate. Fine for a firewalled lab; set a token for anything public.
+
+SSH remains end-to-end encrypted through the relay either way - a relay
+operator cannot read sessions or credentials.
+
+### Enrolling in kino-control (self-enrollment)
+
+A relay can join a kino-control instance's directory, so agents discover it
+automatically (and park on whichever enrolled relay answers fastest). The
+relay enrolls **itself** at startup - two ways:
+
+**Interactive** - run the relay in a terminal with no auth configured, and it
+asks:
+
+```
+No auth is configured (RELAY_TOKEN / RELAY_JWT_PUBLIC_KEY unset).
+Enroll this relay with a kino-control instance? [y/N]
+```
+
+Answer the prompts (control URL, one-time code from the kino-control web UI,
+this relay's public URL) and it handles the rest.
+
+**Env-driven** (docker/systemd - no TTY, no questions):
+
+```bash
+KINO_CONTROL_URL=https://control.example.com \
+KINO_ENROLL_CODE=<one-time code> \
+RELAY_PUBLIC_URL=wss://relay.example.com \
+RELAY_NAME=eu-1 \
+  kino-relay
+```
+
+Either way the relay starts serving first (kino-control probes `/healthz`
+before accepting), then registers, receives kino-control's public key,
+**saves it** (`RELAY_JWT_PUBLIC_KEY` path, default `control.pub.pem`), and
+starts enforcing token auth immediately - no restart. Restarts load the saved
+key and skip enrollment, so the one-time code isn't needed again. From then on
+kino-control health-checks this relay every minute.
+
+Roadmap:
+
+- [x] Token auth on all three WebSocket endpoints.
+- [x] Per-agent scoped tokens (via kino-control JWTs) so an `agent_id` can't be hijacked.
+- [x] Relay registration & presence with kino-control (agents discover relays and park on the fastest).
 - [ ] Optional metrics/observability endpoint.
 
-If you want to help, the auth handshake is a great first substantial
-contribution. Found a vulnerability? Report it privately - see
+Found a vulnerability? Report it privately - see
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
@@ -172,4 +244,7 @@ Contributions are welcome - see **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ## License
 
-[MIT](LICENSE) © 2026 Samarth Kombemane
+[GNU AGPL-3.0](LICENSE) © 2026 Samarth Kombemane
+
+AGPL on purpose: if you run a modified relay as a service, you must share your
+changes. For commercial licensing, contact the author.
