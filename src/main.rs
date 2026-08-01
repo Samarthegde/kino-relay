@@ -216,9 +216,9 @@ fn interactive_enroll_plan(key_out: &str) -> Option<EnrollPlan> {
         return None;
     }
     let control_url = {
-        let entered = prompt("kino-control URL [https://kino.dpdns.org]: ");
+        let entered = prompt("kino-control URL [https://kino.samarthkombemane.com]: ");
         if entered.is_empty() {
-            "https://kino.dpdns.org".to_string()
+            "https://kino.samarthkombemane.com".to_string()
         } else {
             entered
         }
