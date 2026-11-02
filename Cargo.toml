@@ -20,7 +20,7 @@ uuid = { version = "1", features = ["v4"] }
 # Bearer-token auth: static-token comparison that doesn't leak timing, and
 # HS256 JWT verification for tokens issued by kino-control.
 subtle = "2"
-jsonwebtoken = "9"
+jsonwebtoken = "10"
 # Small blocking HTTP client, used once at startup to self-enroll with
 # kino-control. rustls - no OpenSSL system dependency. `native-certs` makes it
 # honour the OS trust store (like kino-agent does), so enrollment works behind
